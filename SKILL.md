@@ -1,7 +1,7 @@
 ---
 name: wled-light-recipe
-description: WLED智能灯带光配方设计师。通过搜索图片、解析颜色分布、生成动态灯光效果并应用到局域网WLED设备。当用户需要基于场景的灯光效果（如茉莉花、日落、海洋）、WLED控制、光配方时调用此技能。
-version: 1.0.0
+description: WLED智能灯带光配方设计师。通过搜索多张图片、解析颜色分布、生成平顺丝滑的动态灯光效果并应用到局域网WLED设备。当用户需要基于场景的灯光效果（如茉莉花、日落、海洋）、WLED控制、光配方时调用此技能。
+version: 2.0.0
 author: symi-daguo
 category: smart-home
 permissions:
@@ -30,21 +30,59 @@ triggers:
   - 调色板
 ---
 
-# WLED Light Recipe Skill
+# WLED Light Recipe Skill v2.0
 
-Design dynamic light recipes for WLED LED strips from natural language scenes.
-Turn "jasmine blooms" into a flowing green-white light effect on your LED strip.
+Design smooth, continuously animating light recipes for WLED LED strips.
+Turn "jasmine blooms" into a gentle flowing color gradient on your LED strip.
 
 ## What This Skill Does
 
 Transforms a scene description (like "jasmine blooms" or "sunset over ocean") into a
-complete WLED light recipe by:
-1. Searching relevant images using built-in web search
-2. Analyzing dominant colors from the best image
-3. Uploading a custom color palette to WLED
-4. Applying the recipe with the best-matching effect
-5. Saving as a WLED preset for reuse
-6. Exporting a portable JSON recipe file for sharing
+smooth WLED light recipe by:
+1. Searching 2-4 relevant images using built-in web search
+2. Analyzing dominant colors from ALL images
+3. Merging colors into a harmonious 3-color palette
+4. Selecting a verified SMOOTH effect (Fade/Dissolve/Breathe/Forest/Sunset/Aurora)
+5. Applying with SLOW speed (SX=70) and LOW intensity (IX=100) for non-flashing animation
+6. Saving as a WLED preset for reuse
+7. Exporting a portable JSON recipe file for sharing
+
+## CRITICAL RULES (NEVER Violate)
+
+### Rule 1: ONLY Use Smooth Effects
+NEVER use flashing/strobe effects. The following are FORBIDDEN:
+- FX 77 (Pacifica) - causes strobe at high speed
+- FX 75 (Flow) - causes strobe
+- FX 35 (Fire) - flickers like fire
+- FX 33 (Fireworks) - strobe flashes
+- FX 1 (Blink) - obvious strobe
+- FX 17 (Twinkle) - random flashes
+- FX 6 (Party) - rapid strobe
+- FX 11 (Rainbow Runner) - fast strobe
+- FX 19 (Splash) - abrupt color jumps
+
+ONLY use these verified SMOOTH effects:
+- FX 12 (Fade) - smoothest color crossfade [DEFAULT]
+- FX 18 (Dissolve) - soft color melting
+- FX 2 (Breathe) - gentle breathing
+- FX 10 (Forest) - smooth nature gradient
+- FX 14 (Rivendell) - cool forest, smooth
+- FX 13 (Sunset) - warm gradient, smooth
+- FX 21 (Sunset 2) - warm sunset
+- FX 50 (Aurora) - northern lights, smooth
+- FX 26 (Beech) - light green nature
+- FX 20 (Pastel) - soft muted colors
+
+### Rule 2: NEVER Use High Speed/Intensity
+- SX (Speed): MUST be 50-90 (slow, gentle)
+- IX (Intensity): MUST be 80-120 (subtle, balanced)
+- BRI (Brightness): MUST be 150-200 (comfortable)
+- SX > 128 causes strobe/flashing - FORBIDDEN
+- IX > 150 causes intense flashing - FORBIDDEN
+
+### Rule 3: Multi-Image Fusion
+Always analyze 2-4 images and MERGE colors. Single image = limited palette.
+Multiple images = rich, harmonious color variety.
 
 ## Prerequisites
 
@@ -55,19 +93,14 @@ complete WLED light recipe by:
 ## Configuration
 
 Before first use, edit `config.json` in the skill directory:
-- `wled.ip`: WLED device IP (leave empty for mDNS auto-discovery, OR fill in like "192.168.1.100")
-- `wled.mdns_name`: WLED mDNS hostname (e.g. wled-751f84, leave empty for auto-discovery)
+- `wled.ip`: WLED device IP (leave empty for mDNS auto-discovery)
 - `layout.type`: LED strip layout - "tv_backlight", "linear", "ring", or "matrix" (default: "linear")
-- `layout.edges`: For TV backlight, specify top/bottom/left/right LED counts (e.g. {"top":16,"bottom":16,"left":12,"right":12})
 - `layout.total_leds`: Total LED count (set to 0 to auto-detect from device)
 
-**Note**: If config is left empty, the skill auto-discovers WLED via mDNS and reads LED count from device.
-If mDNS fails, ask user for WLED IP and set it in config.json before proceeding.
+## Complete Workflow (STANDARD TEMPLATE)
 
-## Complete Workflow
-
-When a user requests a light recipe, follow these steps in order.
-**IMPORTANT**: Use absolute path `/tmp/wled_analysis.json` for temp file, and replace {WLED_IP} with actual IP from Step 1.
+When a user requests a light recipe, follow these steps EXACTLY.
+**Any AI agent can follow this template to produce smooth light effects.**
 
 ### Step 1: Discover WLED Device
 
@@ -75,78 +108,58 @@ When a user requests a light recipe, follow these steps in order.
 python3 scripts/discover_wled.py
 ```
 
-- If success: note the `ip` field from JSON output (e.g. "192.168.1.100"), use as {WLED_IP} in later steps
-- If failed: ask user "请告诉我WLED灯带的IP地址", then update config.json with the IP
-- The script caches the IP to `scripts/.wled_cache.json`, subsequent calls are fast
-- Only re-scan if health check fails or cache is missing
+- Note the `ip` field from JSON output, use as {WLED_IP} in later steps
+- If failed: ask user "请告诉我WLED灯带的IP地址"
 
-### Step 2: Search for Scene Images
+### Step 2: Search for 2-4 Scene Images
 
 Use Doubao's built-in web search to find images for the scene:
 - Search query: "{scene} photo high quality" (e.g. "jasmine flower bloom photo high quality")
-- Collect 2-3 image URLs from search results
+- Collect 2-4 image URLs from search results
 - Prefer landscape orientation images
-- Pick the most representative image URL
+- Pick diverse images (different angles, lighting conditions)
 
-### Step 3: Analyze Image Colors
-
-```bash
-python3 scripts/analyze_image.py "<image_url>" --json --num-colors 5 > /tmp/wled_analysis.json
-```
-
-- The script downloads the image, extracts dominant colors via quantization
-- Outputs JSON with: colors, palette_data, recipe_suggestion, wled_state_patch
-- **IMPORTANT**: Save output to `/tmp/wled_analysis.json` (used in Step 4)
-- Note the `recipe_suggestion.rationale` to explain the choice to user
-
-### Step 4: Export Recipe (Portable File)
+### Step 3: Apply Dynamic Recipe (ONE COMMAND - RECOMMENDED)
 
 ```bash
-python3 scripts/export_recipe.py \
-  --name "{Scene Name}" \
-  --analysis /tmp/wled_analysis.json \
-  --description "{scene description}"
+python3 scripts/apply_dynamic_recipe.py <url1> <url2> <url3> --scene "Scene Name" --save-preset
 ```
 
-- This creates a portable recipe file in the `recipes/` directory (auto-named with timestamp)
-- The file can be shared with others and imported on any WLED
+This single command does EVERYTHING:
+1. Downloads and analyzes all images
+2. Merges colors into 3-color palette
+3. Selects best SMOOTH effect (Fade/Dissolve/Breathe/Forest/Sunset/Aurora)
+4. Applies with SX=70, IX=100 (slow, smooth, non-flashing)
+5. Saves as WLED preset for reuse
 
-### Step 5: Import and Apply Recipe (Full Pipeline)
+The light effect will start playing immediately with smooth, continuous animation.
 
-```bash
-python3 scripts/import_recipe.py recipes/{recipe_file} --save-preset "{Scene Name}"
-```
-
-This single command does three things:
-1. Uploads custom palette to WLED (palette0.json)
-2. Applies the recipe with segments configured for your layout
-3. Saves the current state as a WLED preset (auto-assigned ID 100-250)
-
-The light effect will start playing immediately and loop until changed.
-
-### Step 6: Report to User
+### Step 4: Report to User
 
 Tell the user:
 - The scene name and recipe applied
-- The dominant colors extracted (show hex codes)
-- The effect name and parameters (FX, speed, intensity)
+- The merged colors extracted (show hex codes)
+- The effect name (FX 12 Fade, FX 50 Aurora, etc.)
+- The speed (SX=70 slow) and intensity (IX=100 subtle)
 - The preset ID saved (for recall later)
-- The recipe file path (for sharing)
+- Confirm: "效果平顺丝滑，持续循环播放，无闪烁"
 
 ## Common User Requests
 
-### "Create a light recipe for [scene]"
+### "Create a smooth light recipe for [scene]"
 
-Run the full workflow above. Example scenes:
-- "jasmine blooms" -> search jasmine flower images
-- "sunset over ocean" -> search sunset ocean images
-- "cherry blossom" -> search sakura images
-- "aurora borealis" -> search northern lights images
-- "forest morning" -> search forest sunrise images
+Run the full workflow above with 2-4 images. Example:
+```bash
+python3 scripts/apply_dynamic_recipe.py \
+  "https://example.com/jasmine1.jpg" \
+  "https://example.com/jasmine2.jpg" \
+  "https://example.com/jasmine3.jpg" \
+  --scene "Jasmine Blooms" --save-preset
+```
 
 ### "Apply recipe [name]"
 
-List saved recipes and apply the matching one:
+List saved recipes and apply:
 ```bash
 python3 scripts/export_recipe.py --list
 python3 scripts/import_recipe.py recipes/{file} --save-preset "{name}"
@@ -154,24 +167,15 @@ python3 scripts/import_recipe.py recipes/{file} --save-preset "{name}"
 
 ### "Stop the lights" / "Turn off"
 
-First get WLED IP from cache or Step 1, then run (replace 192.168.1.100 with actual IP):
 ```bash
 python3 -c "
 import urllib.request, json
-req = urllib.request.Request('http://192.168.1.100/json/state',
+req = urllib.request.Request('http://{WLED_IP}/json/state',
     data=json.dumps({'on': False, 'live': False}).encode(),
     headers={'Content-Type': 'application/json'})
 urllib.request.urlopen(req, timeout=3)
 print('Lights off')
 "
-```
-
-**Note**: Replace `192.168.1.100` with the actual WLED IP from Step 1 or `scripts/.wled_cache.json`.
-
-### "List all recipes"
-
-```bash
-python3 scripts/export_recipe.py --list
 ```
 
 ### "Recall preset [ID]"
@@ -187,6 +191,19 @@ print(f'Preset {PRESET_ID} recalled')
 "
 ```
 
+## Effect Selection Logic (Auto)
+
+The `analyze_multi_images.py` auto-selects SMOOTH effects based on dominant theme:
+
+| Dominant Theme | Selected FX | Description |
+|---|---|---|
+| warm (sunset/fire) | 13 (Sunset) | Smooth warm gradient |
+| nature (forest/spring) | 12 (Fade) | Smoothest color crossfade |
+| cool (ocean/sky) | 50 (Aurora) | Smooth northern lights |
+| party (night/dream) | 12 (Fade) | Default smooth |
+
+All effects use SX=70 (slow), IX=100 (subtle) for non-flashing animation.
+
 ## Layout-Aware Segments
 
 The skill automatically creates segments based on `config.json` layout:
@@ -196,39 +213,12 @@ The skill automatically creates segments based on `config.json` layout:
 - **ring**: 1 segment (treated as linear)
 - **matrix**: 1 segment (user should configure 2D separately)
 
-For TV backlight, each edge gets a slightly rotated color set for visual variety.
-
-## Effect Selection Logic
-
-The `analyze_image.py` script auto-selects effects based on color analysis:
-
-| Avg Hue Range | Theme | Effect Example |
-|---|---|---|
-| 0-60°, 330-360° | Warm (sunset/fire) | FX 13 Sunset, 35 Fire |
-| 60-180° | Nature (forest/spring) | FX 10 Forest, 14 Rivendell |
-| 180-270° | Cool (ocean/sky) | FX 9 Rainbow, 9 Ocean-like |
-| 270-330° | Party (night/dream) | FX 6 Party, 11 Rainbow |
-
-Speed and intensity are auto-tuned based on saturation and color diversity.
-
 ## Error Handling
 
 - **WLED not found**: Run `discover_wled.py --force` or ask user for IP
 - **Image download fails**: Try next image URL from search results
-- **Palette upload fails**: Continue with built-in palette (non-fatal)
+- **UDP realtime active (live=true)**: Script auto-sends `{"live":false}` to take control
 - **Preset save fails**: Recipe still applied, just not saved as preset
-- **UDP realtime active**: Script auto-sends `{"live":false}` to take control
-
-## Mobile Doubao Compatibility
-
-This skill is designed to work on both desktop and mobile Doubao:
-- All scripts use Python 3 standard library + Pillow only
-- Image download uses urllib (no requests dependency required)
-- mDNS discovery uses socket.gethostbyname (works on mobile)
-- If mobile Doubao cannot execute Python, use the visual analysis fallback:
-  1. Doubao analyzes the image directly using vision capability
-  2. Output colors as JSON manually
-  3. Call apply_recipe.py with the manual recipe JSON
 
 ## Recipe File Format
 
@@ -238,21 +228,19 @@ All recipe files use a portable JSON format (`doubao-wled-recipe-v1`):
 {
   "name": "Jasmine Blooms",
   "description": "Jasmine flower colors",
-  "version": "1.0",
+  "version": "2.0",
   "format": "doubao-wled-recipe-v1",
-  "colors": [[100,150,80], [179,219,149], [240,250,219], [254,229,100]],
+  "colors": [[100,150,80], [179,219,149], [240,250,219]],
   "palette_data": [0,100,150,80, 85,179,219,149, 170,240,250,219, 255,254,229,100],
-  "fx": 10,
-  "sx": 176,
-  "ix": 165,
-  "bri": 218,
+  "fx": 12,
+  "sx": 70,
+  "ix": 100,
+  "bri": 180,
   "pal": 0,
   "theme": "nature",
-  "rationale": "Green/yellow tones - nature/forest effect"
+  "rationale": "Merged 3 images, smooth FX 12 Fade for continuous animation"
 }
 ```
-
-Files can be shared between users and imported on any WLED device running 0.14+.
 
 ## Directory Structure
 
@@ -262,12 +250,15 @@ wled-light-recipe/
 ├── config.json                   # Device & layout configuration
 ├── scripts/
 │   ├── discover_wled.py          # mDNS discovery + health check
-│   ├── analyze_image.py          # Image color extraction
+│   ├── analyze_image.py          # Single image color extraction
+│   ├── analyze_multi_images.py   # Multi-image analysis + color merging
 │   ├── apply_recipe.py           # Apply recipe to WLED
+│   ├── apply_dynamic_recipe.py   # ONE-SHOT pipeline (RECOMMENDED)
+│   ├── build_playlist.py         # Playlist builder (advanced)
 │   ├── save_preset.py            # Save current state as preset
 │   ├── upload_palette.py         # Upload custom palette
 │   ├── export_recipe.py          # Export recipe to JSON file
-│   ├── import_recipe.py          # Import & apply recipe (full pipeline)
+│   ├── import_recipe.py          # Import & apply recipe
 │   └── .wled_cache.json          # Cached WLED IP (auto-generated)
 ├── references/
 │   ├── wled_api.md               # WLED JSON API reference
@@ -278,25 +269,28 @@ wled-light-recipe/
 
 ## Example Conversation
 
-**User**: "I want jasmine bloom lighting effect"
+**User**: "我需要茉莉花盛开的灯光效果"
 
 **Assistant**:
-1. Discovers WLED device on LAN
-2. Searches "jasmine flower bloom photo high quality"
-3. Analyzes top image: extracts green (37%), light green (36%), white (20%), yellow (7%)
-4. Selects FX 10 (Forest) with speed 176, intensity 165
-5. Uploads custom palette with these colors
-6. Applies recipe with 4 TV-backlight segments
-7. Saves as preset ID 100 "Jasmine Blooms"
-8. Exports recipe to recipes/jasmine_blooms_20260729_110259.json
+1. Discovers WLED device on LAN (e.g. 192.168.2.66)
+2. Searches "jasmine flower bloom photo high quality" - gets 3 image URLs
+3. Runs: `python3 scripts/apply_dynamic_recipe.py url1 url2 url3 --scene "Jasmine Blooms" --save-preset`
+4. Script analyzes all 3 images, merges colors, selects FX 12 (Fade)
+5. Applies with SX=70 (slow), IX=100 (subtle) - smooth, non-flashing
+6. Saves as preset ID 100
 
-**Response**: "Jasmine Blooms light recipe applied! Colors: #649650 (green), #B3DB95 (light green), #F0FADB (white), #FEE564 (yellow). Effect: Forest (FX 10) at speed 176. Saved as preset 100. Recipe file: recipes/jasmine_blooms_20260729_110259.json"
+**Response**: "茉莉花盛开光配方已应用！融合颜色：#8DA866 (绿), #B3DB95 (浅绿), #F0FADB (白)。效果：Fade (FX 12)，速度70（慢速），强度100（柔和）。效果平顺丝滑，持续循环播放，无闪烁。已保存为预设100。"
 
 ## Tips for Best Results
 
+- Use 2-4 images for rich color variety (single image = limited palette)
 - Use specific scene names ("jasmine blooms" vs just "flowers")
 - For seasonal themes, add the season ("autumn forest" vs "forest")
-- For time-of-day, specify ("sunset ocean" vs "ocean")
 - The skill auto-loops the effect until you change it
 - To recall a saved recipe: "apply jasmine blooms recipe"
 - To share: send the recipe JSON file from recipes/ directory
+
+## Version History
+
+- v2.0.0: Multi-image fusion, SMOOTH-ONLY effects, SX=70/IX=100 non-flashing
+- v1.0.0: Initial release, single image, had flashing issues
