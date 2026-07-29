@@ -1,7 +1,7 @@
 ---
 name: wled-light-recipe
 description: WLED智能灯带光配方设计师。通过搜索多张图片、解析颜色分布、生成平顺丝滑的动态灯光效果并应用到局域网WLED设备。当用户需要基于场景的灯光效果（如茉莉花、日落、海洋）、WLED控制、光配方时调用此技能。
-version: 1.0.1
+version: 1.0.2
 author: symi-daguo
 category: smart-home
 permissions:
@@ -30,7 +30,7 @@ triggers:
   - 调色板
 ---
 
-# WLED Light Recipe Skill v1.0.1
+# WLED Light Recipe Skill v1.0.2
 
 Design smooth, continuously animating light recipes for WLED LED strips.
 Turn "jasmine blooms" into a gentle flowing color gradient on your LED strip.
@@ -188,28 +188,62 @@ python3 scripts/discover_wled.py
 - Note the `ip` field from JSON output, use as {WLED_IP} in later steps
 - If failed: ask user "请告诉我WLED灯带的IP地址"
 
-### Step 2: Search for 2-4 Scene Images
+### Step 2: Search for 2-4 Real High-Quality Landscape Images (CRITICAL)
 
-Use Doubao's built-in web search to find images for the scene:
-- Search query: "{scene} photo high quality" (e.g. "jasmine flower bloom photo high quality")
-- Collect 2-4 image URLs from search results
-- Prefer landscape orientation images
-- Pick diverse images (different angles, lighting conditions)
+Use Doubao's built-in web search to find REAL photographs for the scene.
+
+**MANDATORY Image Requirements:**
+1. **REAL photographs only** - NO illustrations, NO cartoons, NO AI-generated art, NO clipart
+2. **Landscape orientation** - width > height (portrait images will be REJECTED)
+3. **High resolution** - minimum 1280px width (1920x1080 or 4K preferred)
+4. **2-4 images** - need multiple images for rich color variety
+5. **Diverse content** - different angles, lighting, backgrounds of the same scene
+
+**Search Query Template:**
+```
+{scene} photo high quality landscape 4K
+```
+
+Examples:
+- "jasmine flower bloom photo high quality landscape 4K"
+- "sunset ocean photo high quality landscape 4K"
+- "cherry blossom photo high quality landscape 4K"
+
+**How to Get Image URLs:**
+1. Use Doubao web search with the query above
+2. From search results, find image URLs (https://...jpg/.png)
+3. Good sources: wallpaper sites (wallpaperaccess.com), stock photo sites (pexels.com, unsplash.com)
+4. Verify each URL is a direct image link (ends with .jpg, .png, or returns image content)
+5. The script will automatically validate: landscape orientation + min 1280px width
+6. Portrait/low-res images are auto-skipped, so collect 4-6 URLs to ensure 2-3 valid ones
+
+**IMPORTANT:** Do NOT use locally generated or synthetic images. The skill validates image quality
+and will reject images that don't meet landscape + HD requirements.
 
 ### Step 3: Apply Dynamic Recipe (ONE COMMAND - RECOMMENDED)
 
 ```bash
-python3 scripts/apply_dynamic_recipe.py <url1> <url2> <url3> --scene "Scene Name" --save-preset
+python3 scripts/apply_dynamic_recipe.py <url1> <url2> <url3> --scene "Scene Name" --save-preset --show-images --device {ADB_DEVICE}
 ```
 
 This single command does EVERYTHING:
-1. Downloads and analyzes all images
-2. Merges colors into 3-color palette
-3. Selects best SMOOTH effect (Fade/Dissolve/Breathe/Forest/Sunset/Aurora)
-4. Applies with SX=70, IX=100 (slow, smooth, non-flashing)
-5. Saves as WLED preset for reuse
+1. Downloads and validates all images (landscape + HD only, auto-skip invalid)
+2. Analyzes colors from valid images using PIL quantize + white detection
+3. Merges colors into 3-color palette (preserves white flowers, clouds, etc.)
+4. Selects best SMOOTH effect (Fade/Dissolve/Breathe/Forest/Sunset/Aurora)
+5. Applies with SX=70, IX=100 (slow, smooth, non-flashing)
+6. Saves as WLED preset for reuse
+7. **NEW**: Pushes source images to Android device screen via ADB (if --show-images)
+
+**Parameters:**
+- `--show-images`: Push source images to screen so customer sees where colors came from
+- `--device 192.168.2.43:5555`: ADB device address (Android TV, amplifier with screen)
+- `--duration 30`: How long to display images (seconds, default 30)
+- `--local`: If no ADB device, open images on local computer instead
+- `--save-preset`: Save as WLED preset for later recall
 
 The light effect will start playing immediately with smooth, continuous animation.
+Source images will display on screen simultaneously so customer understands the color origin.
 
 ### Step 4: Report to User
 
@@ -325,12 +359,14 @@ All recipe files use a portable JSON format (`doubao-wled-recipe-v1`):
 wled-light-recipe/
 ├── SKILL.md                      # This file (skill instructions)
 ├── config.json                   # Device & layout configuration
+├── config.example.json           # Config template with documentation
 ├── scripts/
 │   ├── discover_wled.py          # mDNS discovery + health check
-│   ├── analyze_image.py          # Single image color extraction
+│   ├── analyze_image.py          # Single image color extraction + quality validation
 │   ├── analyze_multi_images.py   # Multi-image analysis + color merging
 │   ├── apply_recipe.py           # Apply recipe to WLED
 │   ├── apply_dynamic_recipe.py   # ONE-SHOT pipeline (RECOMMENDED)
+│   ├── show_recipe_gallery.py    # NEW: Push images to screen via ADB
 │   ├── build_playlist.py         # Playlist builder (advanced)
 │   ├── save_preset.py            # Save current state as preset
 │   ├── upload_palette.py         # Upload custom palette
@@ -341,7 +377,7 @@ wled-light-recipe/
 │   ├── wled_api.md               # WLED JSON API reference
 │   └── effects_palettes.md       # Effects & palettes list
 ├── recipes/                      # Exported recipe files
-└── assets/                       # Test images
+└── assets/                       # Test images (real photos only)
 ```
 
 ## Example Conversation
@@ -369,5 +405,6 @@ wled-light-recipe/
 
 ## Version History
 
+- v1.0.2: 新增图片质量验证(landscape+1280px)、ADB推送图片到屏幕、白色检测优化
 - v1.0.1: 修复暴闪问题，仅用平滑FX(Fade/Dissolve/Breathe)，SX=70/IX=100，多图融合
 - v1.0.0: 初始版本，单图分析，存在闪烁问题

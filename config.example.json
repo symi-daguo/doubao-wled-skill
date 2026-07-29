@@ -57,5 +57,12 @@
     "max_images_per_query": 3,
     "preferred_orientation": "landscape",
     "fallback_query_template": "{scene} high quality photo"
+  },
+  "adb": {
+    "device": "",
+    "duration_sec": 30,
+    "push_dir": "/sdcard/Pictures/wled_recipe",
+    "enabled": false,
+    "note": "Optional: ADB device address for pushing recipe images to screen (e.g. Android TV, amplifier with screen). Set device to '192.168.2.43:5555' format. Leave empty to open images locally instead."
   }
 }

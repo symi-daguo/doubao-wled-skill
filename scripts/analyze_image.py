@@ -30,16 +30,42 @@ def load_config():
         return json.load(f)
 
 
-def load_image(source, max_size=150):
-    """Load image from URL, file path, or base64. Returns PIL Image."""
+def validate_image_quality(img, min_width=1280, require_landscape=True):
+    """Validate image meets quality standards for light recipe.
+    Returns (is_valid, reason, info_dict).
+    """
+    w, h = img.size
+    is_landscape = w > h
+    is_hd = w >= min_width
+    ratio = w / h if h > 0 else 0
+
+    info = {
+        "width": w,
+        "height": h,
+        "ratio": round(ratio, 2),
+        "is_landscape": is_landscape,
+        "is_hd": is_hd
+    }
+
+    if require_landscape and not is_landscape:
+        return False, f"Image is portrait ({w}x{h}), landscape required (width>height)", info
+    if not is_hd:
+        return False, f"Image too small ({w}x{h}), minimum width {min_width}px required", info
+    return True, "OK", info
+
+
+def load_image(source, max_size=150, validate_quality=True):
+    """Load image from URL, file path, or base64. Returns PIL Image.
+    If validate_quality=True, rejects portrait and low-res images.
+    """
     try:
         from PIL import Image
     except ImportError:
         raise RuntimeError("PIL/Pillow is required. Install with: pip install Pillow")
 
     if source.startswith(("http://", "https://")):
-        req = urllib.request.Request(source, headers={"User-Agent": "DoubaoWledSkill/1.0"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        req = urllib.request.Request(source, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
             img_data = resp.read()
         img = Image.open(io.BytesIO(img_data))
     elif source.startswith("data:"):
@@ -54,6 +80,13 @@ def load_image(source, max_size=150):
 
     if img.mode != "RGB":
         img = img.convert("RGB")
+
+    # Validate image quality BEFORE downscaling (check original resolution)
+    if validate_quality:
+        is_valid, reason, info = validate_image_quality(img)
+        if not is_valid:
+            raise ValueError(f"Image quality check failed: {reason}")
+
     # Downscale aggressively for speed (max 150x150 = 22500 px max)
     if max(img.size) > max_size:
         img.thumbnail((max_size, max_size), Image.LANCZOS)

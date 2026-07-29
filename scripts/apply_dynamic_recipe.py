@@ -7,10 +7,15 @@ This is the RECOMMENDED workflow for creating dynamic, continuously animating li
 The merged recipe uses a single dynamic FX (Pacifica/Sunset/Flow) with merged colors
 from all images, ensuring smooth continuous animation without playlist dependency.
 
+NEW in v1.0.2: Optional --show-images flag pushes source images to Android device screen
+via ADB, so customers can see where the light recipe came from.
+
 Usage:
     python3 apply_dynamic_recipe.py <url1> <url2> [url3] [url4] --scene "Scene Name"
     python3 apply_dynamic_recipe.py --urls-file urls.txt --scene "Jasmine Blooms"
     python3 apply_dynamic_recipe.py <url1> <url2> --scene "Sunset" --save-preset
+    python3 apply_dynamic_recipe.py <img1> <img2> --scene "Jasmine" --show-images --device 192.168.2.43:5555
+    python3 apply_dynamic_recipe.py <img1> <img2> --scene "Jasmine" --show-images --local
 
 Output: JSON with {success, scene, colors, fx, message}
 """
@@ -37,12 +42,63 @@ def check_and_warn_live(ip):
     return False
 
 
+def filter_valid_images(image_sources):
+    """Filter image sources to only valid landscape HD images.
+    Returns (valid_sources, skipped_info).
+    """
+    valid = []
+    skipped = []
+    for src in image_sources:
+        try:
+            # Try to load and validate
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from analyze_image import load_image
+            img = load_image(src, validate_quality=True)
+            valid.append(src)
+        except ValueError as e:
+            # Quality check failed
+            skipped.append({"source": src, "reason": str(e)})
+        except Exception as e:
+            # Download or other error
+            skipped.append({"source": src, "reason": str(e)})
+    return valid, skipped
+
+
 def apply_dynamic_recipe(image_sources, scene_name, save_preset=False):
-    """Full pipeline: multi-image analysis -> merged recipe -> apply to WLED."""
-    # Step 1: Analyze multiple images
-    analysis = analyze_multi_images(image_sources, scene_name)
+    """Full pipeline: filter images -> multi-image analysis -> merged recipe -> apply to WLED."""
+    # Step 0: Filter to valid landscape HD images only
+    valid_sources, skipped = filter_valid_images(image_sources)
+
+    if not valid_sources:
+        return {
+            "success": False,
+            "message": ("No valid landscape HD images found. "
+                       f"All {len(image_sources)} images were skipped. "
+                       "Requirements: landscape orientation (width>height), min 1280px width. "
+                       "Search for '{scene} photo high quality landscape 4K' and use real photo URLs."),
+            "skipped_images": skipped
+        }
+
+    if len(valid_sources) < 2:
+        return {
+            "success": False,
+            "message": (f"Only {len(valid_sources)} valid image(s) found, need at least 2. "
+                       "Search for more '{scene} photo high quality landscape' images."),
+            "valid_images": valid_sources,
+            "skipped_images": skipped
+        }
+
+    # Step 1: Analyze multiple images (only valid ones)
+    analysis = analyze_multi_images(valid_sources, scene_name)
     if not analysis.get("success"):
         return analysis
+
+    # Add filter info to analysis
+    analysis["images_filtered"] = {
+        "valid_count": len(valid_sources),
+        "skipped_count": len(skipped),
+        "skipped": skipped
+    }
 
     merged_recipe = analysis.get("merged_recipe")
     if not merged_recipe:
@@ -125,6 +181,10 @@ def main():
     save_preset = False
     urls_file = None
     image_sources = []
+    show_images = False
+    device = None
+    local_view = False
+    duration = 30
 
     i = 1
     while i < len(sys.argv):
@@ -135,6 +195,14 @@ def main():
             save_preset = True; i += 1
         elif arg == "--urls-file" and i + 1 < len(sys.argv):
             urls_file = sys.argv[i + 1]; i += 2
+        elif arg == "--show-images":
+            show_images = True; i += 1
+        elif arg == "--device" and i + 1 < len(sys.argv):
+            device = sys.argv[i + 1]; i += 2
+        elif arg == "--local":
+            local_view = True; i += 1
+        elif arg == "--duration" and i + 1 < len(sys.argv):
+            duration = int(sys.argv[i + 1]); i += 2
         else:
             image_sources.append(arg); i += 1
 
@@ -149,7 +217,58 @@ def main():
     if len(image_sources) > 6:
         image_sources = image_sources[:6]
 
+    # If --show-images but no device and no --local, try to read device from config
+    if show_images and not device and not local_view:
+        config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json")
+        if os.path.exists(config_path):
+            with open(config_path, "r") as f:
+                config = json.load(f)
+            adb_cfg = config.get("adb", {})
+            device = adb_cfg.get("device")
+            if adb_cfg.get("duration"):
+                duration = adb_cfg.get("duration")
+
     result = apply_dynamic_recipe(image_sources, scene_name, save_preset=save_preset)
+
+    # If recipe applied successfully and --show-images, push images to screen
+    if result.get("success") and show_images:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        try:
+            from show_recipe_gallery import show_recipe_gallery
+            import threading
+
+            # Run gallery in background thread so WLED effect starts immediately
+            gallery_result_holder = {}
+
+            def run_gallery():
+                gallery_result_holder["result"] = show_recipe_gallery(
+                    image_sources,
+                    device=device,
+                    duration_sec=duration,
+                    local=local_view
+                )
+
+            gallery_thread = threading.Thread(target=run_gallery, daemon=False)
+            gallery_thread.start()
+
+            # Wait briefly for images to be pushed (but don't block full duration)
+            gallery_thread.join(timeout=15)
+
+            if gallery_result_holder.get("result"):
+                gallery_result = gallery_result_holder["result"]
+                result["gallery"] = gallery_result
+                result["message"] += f" Images displayed on {gallery_result.get('device', 'screen')}."
+            else:
+                # Gallery still running in background, return immediately
+                result["gallery"] = {
+                    "success": True,
+                    "device": device or "local",
+                    "message": f"Gallery display running in background for {duration}s"
+                }
+                result["message"] += f" Images displaying in background for {duration}s."
+        except Exception as e:
+            result["gallery"] = {"success": False, "message": f"Gallery display failed: {e}"}
+
     print(json.dumps(result, indent=2, ensure_ascii=False))
     sys.exit(0 if result.get("success") else 1)
 
