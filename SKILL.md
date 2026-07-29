@@ -1,13 +1,33 @@
 ---
-name: "wled-light-recipe"
-description: >-
-  WLED smart light recipe designer. Generates dynamic light effects for WLED LED strips
-  by searching images, analyzing color distributions, and applying recipes to LAN WLED devices.
-  Invoke when user asks for scene-based lighting (e.g. jasmine blooms, sunset, ocean),
-  light recipes, WLED control, or mentions flower/scene/scenery lighting effects.
-  Trigger words: light recipe, WLED, light effect, jasmine, flower, sunset, ocean,
-  light formula, color from image, scene lighting, 灯光效果, 光配方, 灯光场景, 茉莉花, 花开, 日落, 海洋.
-  Do not invoke for non-lighting tasks or generic image search without WLED control intent.
+name: wled-light-recipe
+description: WLED智能灯带光配方设计师。通过搜索图片、解析颜色分布、生成动态灯光效果并应用到局域网WLED设备。当用户需要基于场景的灯光效果（如茉莉花、日落、海洋）、WLED控制、光配方时调用此技能。
+version: 1.0.0
+author: symi-daguo
+category: smart-home
+permissions:
+  - network
+  - read
+  - execute
+triggers:
+  - 灯光效果
+  - 光配方
+  - 灯光场景
+  - WLED
+  - 茉莉花
+  - 花开
+  - 日落
+  - 海洋
+  - 灯光
+  - light recipe
+  - light effect
+  - WLED control
+  - scene lighting
+  - jasmine
+  - sunset
+  - ocean
+  - 灯带
+  - 灯珠
+  - 调色板
 ---
 
 # WLED Light Recipe Skill

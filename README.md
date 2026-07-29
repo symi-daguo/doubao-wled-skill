@@ -14,18 +14,29 @@
 
 ## 安装方法
 
-### 方法一：豆包专业版导入（推荐）
+### 方法一：从 GitHub 仓库导入（推荐，手机版/桌面版通用）
 
-1. 打开豆包桌面端，切换到"办公任务"模式
-2. 输入 `/创建技能` 或 `/install-skill`
-3. 选择本地导入，上传 `doubao-wled-skill` 目录
-4. 按提示完成安装
+仓库地址：`https://github.com/symi-daguo/doubao-wled-skill`
 
-### 方法二：手动导入
+1. 打开豆包 App（手机版或桌面版）
+2. 进入技能管理页面（通常在"我的"→"技能"或设置中）
+3. 选择"从 GitHub 导入"或"添加技能"
+4. 输入仓库地址：`https://github.com/symi-daguo/doubao-wled-skill`
+5. 确认导入，豆包会自动读取根目录的 `SKILL.md` 加载技能
+6. 技能名称显示为 `wled-light-recipe`，安装完成
 
-1. 将 `doubao-wled-skill` 目录复制到豆包技能目录
-2. 重启豆包客户端
-3. 在技能列表中确认 `wled-light-recipe` 已加载
+### 方法二：本地导入
+
+1. `git clone https://github.com/symi-daguo/doubao-wled-skill.git`
+2. 打开豆包桌面端，切换到"办公任务"模式
+3. 输入 `/创建技能` 或 `/install-skill`
+4. 选择本地导入，指定 clone 下来的目录
+5. 按提示完成安装
+
+### 方法三：直接引用 Raw 链接
+
+如果豆包支持 Raw 链接导入，可直接引用：
+`https://raw.githubusercontent.com/symi-daguo/doubao-wled-skill/main/SKILL.md`
 
 ## 配置说明
 
