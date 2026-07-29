@@ -31,3 +31,7 @@ Thumbs.db
 recipes/*.json
 !recipes/README.md
 !recipes/example_recipe.json
+
+# Real photo assets (copyrighted, not for commit)
+assets/test_scenes/*.jpg
+assets/test_scenes/*.png
