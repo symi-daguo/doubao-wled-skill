@@ -11,7 +11,7 @@
     "re_discover_on_failure": true
   },
   "layout": {
-    "type": "tv_backlight",
+    "type": "linear",
     "total_leds": 0,
     "edges": {"top": 0, "bottom": 0, "left": 0, "right": 0},
     "start_corner": "top_left",
