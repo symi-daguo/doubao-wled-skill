@@ -10,6 +10,7 @@ Usage:
     python3 save_preset.py 100 "Jasmine Blooms"
     python3 save_preset.py --auto "Jasmine Blooms"    # auto-find free ID
     python3 save_preset.py --list                       # list existing presets
+    python3 save_preset.py --help                       # show help
 
 Output: JSON with {success, preset_id, name, message}
 """
@@ -29,16 +30,24 @@ def load_config():
 
 
 def get_wled_ip():
+    """Get WLED IP from cache or config. Returns empty string if not found."""
     cache_path = os.path.join(SCRIPT_DIR, ".wled_cache.json")
     if os.path.exists(cache_path):
-        with open(cache_path, "r") as f:
-            cache = json.load(f)
-            if cache.get("ip"):
-                return cache["ip"]
-    return load_config().get("wled", {}).get("ip", "192.168.2.66")
+        try:
+            with open(cache_path, "r") as f:
+                cache = json.load(f)
+                if cache.get("ip"):
+                    return cache["ip"]
+        except Exception:
+            pass
+    config = load_config()
+    ip = config.get("wled", {}).get("ip", "")
+    return ip
 
 
 def wled_request(ip, path, method="GET", data=None, timeout=5):
+    if not ip:
+        return {"error": "WLED IP not configured. Run discover_wled.py first or set ip in config.json"}
     url = f"http://{ip}{path}"
     req = urllib.request.Request(url, headers={"User-Agent": "DoubaoWledSkill/1.0"})
     if method == "POST" and data is not None:
@@ -56,13 +65,15 @@ def wled_request(ip, path, method="GET", data=None, timeout=5):
 
 
 def list_presets(ip):
-    """Fetch existing presets from WLED."""
+    """Fetch existing presets from WLED.
+    Returns dict like {"0": {...}, "1": {...}} or empty dict on failure.
+    """
     result = wled_request(ip, "/presets.json", method="GET")
-    if "error" in result:
-        # Some WLED versions require different path
-        result = wled_request(ip, "/json", method="GET")
-        return result.get("state", {}).get("ps", -1)
-    return result
+    if isinstance(result, dict) and "error" not in result:
+        return result
+    # Fallback: try /edit?list=/ to list files (returns HTML, hard to parse)
+    # If both fail, return empty dict so find_free_preset_id can still work
+    return {}
 
 
 def find_free_preset_id(ip, id_start=100, id_end=250):
@@ -70,11 +81,10 @@ def find_free_preset_id(ip, id_start=100, id_end=250):
     presets = list_presets(ip)
     used_ids = set()
     if isinstance(presets, dict):
-        # presets.json format: {"0": {...}, "1": {...}, ...}
         for k in presets.keys():
             try:
                 used_ids.add(int(k))
-            except ValueError:
+            except (ValueError, TypeError):
                 continue
     for pid in range(id_start, id_end + 1):
         if pid not in used_ids:
@@ -85,9 +95,10 @@ def find_free_preset_id(ip, id_start=100, id_end=250):
 def save_preset(preset_id, name):
     """Save current WLED state as a preset."""
     ip = get_wled_ip()
+    if not ip:
+        return {"success": False, "message": "WLED IP not configured. Run discover_wled.py first or set ip in config.json"}
 
     # WLED API: POST /json/state {"psave": <id>, "n": "<name>"}
-    # This saves the current state to the preset slot
     state = {"psave": preset_id}
     if name:
         state["n"] = name
@@ -111,6 +122,10 @@ def save_preset(preset_id, name):
 
 
 def main():
+    if "--help" in sys.argv or "-h" in sys.argv:
+        print(__doc__)
+        sys.exit(0)
+
     config = load_config()
     storage_cfg = config.get("recipe_storage", {})
     id_start = storage_cfg.get("preset_id_start", 100)
@@ -118,22 +133,27 @@ def main():
 
     if "--list" in sys.argv:
         ip = get_wled_ip()
+        if not ip:
+            print(json.dumps({"success": False, "message": "WLED IP not configured"}, ensure_ascii=False))
+            sys.exit(1)
         presets = list_presets(ip)
         print(json.dumps({"success": True, "presets": presets, "ip": ip}, indent=2, ensure_ascii=False))
         return
 
     if "--auto" in sys.argv:
-        # Auto-find free ID
         name_idx = sys.argv.index("--auto") + 1
         name = sys.argv[name_idx] if name_idx < len(sys.argv) else "Unnamed Recipe"
         ip = get_wled_ip()
+        if not ip:
+            print(json.dumps({"success": False, "message": "WLED IP not configured. Run discover_wled.py first"}, ensure_ascii=False))
+            sys.exit(1)
         pid = find_free_preset_id(ip, id_start, id_end)
         if pid is None:
             print(json.dumps({"success": False, "message": f"No free preset ID in range {id_start}-{id_end}"}, ensure_ascii=False))
             sys.exit(1)
     else:
         if len(sys.argv) < 3:
-            print(json.dumps({"success": False, "message": "Usage: save_preset.py <preset_id> <name>  OR  save_preset.py --auto <name>"}, ensure_ascii=False))
+            print(json.dumps({"success": False, "message": "Usage: save_preset.py <preset_id> <name>  OR  save_preset.py --auto <name>  OR  save_preset.py --list"}, ensure_ascii=False))
             sys.exit(1)
         pid = int(sys.argv[1])
         name = sys.argv[2]

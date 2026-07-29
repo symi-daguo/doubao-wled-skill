@@ -275,6 +275,10 @@ def list_devices():
 
 
 if __name__ == "__main__":
+    if "--help" in sys.argv or "-h" in sys.argv:
+        print(__doc__)
+        sys.exit(0)
+
     force = "--force" in sys.argv
     health_only = "--health-only" in sys.argv
     list_mode = "--list" in sys.argv

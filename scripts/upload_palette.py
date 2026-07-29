@@ -29,13 +29,17 @@ def load_config():
 
 
 def get_wled_ip():
+    """Get WLED IP from cache or config. Returns empty string if not found."""
     cache_path = os.path.join(SCRIPT_DIR, ".wled_cache.json")
     if os.path.exists(cache_path):
-        with open(cache_path, "r") as f:
-            cache = json.load(f)
-            if cache.get("ip"):
-                return cache["ip"]
-    return load_config().get("wled", {}).get("ip", "192.168.2.66")
+        try:
+            with open(cache_path, "r") as f:
+                cache = json.load(f)
+                if cache.get("ip"):
+                    return cache["ip"]
+        except Exception:
+            pass
+    return load_config().get("wled", {}).get("ip", "")
 
 
 def upload_palette_file(ip, palette_id, palette_data):
@@ -104,6 +108,8 @@ def _try_put_edit(ip, filename, content):
 def upload_palette(palette_id, palette_data):
     """Upload custom palette to WLED."""
     ip = get_wled_ip()
+    if not ip:
+        return {"success": False, "message": "WLED IP not configured. Run discover_wled.py first or set ip in config.json"}
 
     # Validate palette_id range
     config = load_config()
@@ -128,12 +134,16 @@ def upload_palette(palette_id, palette_data):
         "ip": ip,
         "upload_result": result,
         "usage_hint": f"To use this palette, set segment 'pal' to custom palette index {palette_id} (displayed as '~ Custom {palette_id} ~' after WLED reboot)",
-        "note": "WLED may need a reboot to recognize the new palette. Use 'reboot' command or power cycle.",
+        "note": "WLED may need a reboot to recognize the new palette. Use 'reboot' command or power cycle. NOTE: apply_recipe.py uses col array directly, so palette upload is optional.",
         "message": f"Custom palette {palette_id} uploaded to WLED at {ip}" if result.get("success") else f"Upload failed: {result.get('error', 'unknown')}"
     }
 
 
 def main():
+    if "--help" in sys.argv or "-h" in sys.argv:
+        print(__doc__)
+        sys.exit(0)
+
     if "--from-analysis" in sys.argv:
         # Load palette_data from analyze_image.py output
         idx = sys.argv.index("--from-analysis") + 1

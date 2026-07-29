@@ -141,20 +141,38 @@ def analyze_colors(img, num_colors=5, min_saturation=30, min_brightness=20, avoi
         return []
 
     # Filter colors based on HSV criteria
+    # Track filtered-out colors for fallback use
     colors = []
+    gray_colors = []  # Low saturation colors, kept as fallback
     for rgb, ratio in raw_colors:
         r, g, b = rgb
         h, s, v = rgb_to_hsv(r, g, b)
         if avoid_overdark and v < min_brightness:
             continue
-        colors.append({
+        entry = {
             "rgb": [r, g, b],
             "hex": "#{:02X}{:02X}{:02X}".format(r, g, b),
             "ratio": round(ratio, 4),
             "hsv": {"h": round(h, 1), "s": round(s, 1), "v": round(v, 1)}
-        })
+        }
+        # Separate saturated colors from gray/white colors
+        if s < min_saturation:
+            gray_colors.append(entry)
+        else:
+            colors.append(entry)
 
-    # If filtering removed too many, relax criteria
+    # If filtering removed too many saturated colors, add gray/white colors as fallback
+    # This preserves white flowers, clouds, snow etc. which are low-saturation but important
+    if len(colors) < 3 and gray_colors:
+        # Sort gray colors by ratio descending
+        gray_colors.sort(key=lambda x: x["ratio"], reverse=True)
+        for gc in gray_colors:
+            if gc not in colors:
+                colors.append(gc)
+                if len(colors) >= num_colors:
+                    break
+
+    # If still not enough, relax brightness filter and add any remaining
     if len(colors) < 3:
         for rgb, ratio in raw_colors:
             r, g, b = rgb

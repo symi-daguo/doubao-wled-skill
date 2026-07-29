@@ -23,15 +23,19 @@ SKILL_DIR = os.path.dirname(SCRIPT_DIR)
 
 
 def get_wled_ip():
+    """Get WLED IP from cache or config. Returns empty string if not found."""
     cache_path = os.path.join(SCRIPT_DIR, ".wled_cache.json")
     if os.path.exists(cache_path):
-        with open(cache_path, "r") as f:
-            cache = json.load(f)
-            if cache.get("ip"):
-                return cache["ip"]
+        try:
+            with open(cache_path, "r") as f:
+                cache = json.load(f)
+                if cache.get("ip"):
+                    return cache["ip"]
+        except Exception:
+            pass
     config_path = os.path.join(SKILL_DIR, "config.json")
     with open(config_path, "r") as f:
-        return json.load(f).get("wled", {}).get("ip", "192.168.2.66")
+        return json.load(f).get("wled", {}).get("ip", "")
 
 
 def wled_request(ip, path, method="GET", data=None, timeout=5):
@@ -60,6 +64,9 @@ def import_recipe(recipe_file, save_preset_name=None, skip_palette=False, dry_ru
         recipe = json.load(f)
 
     ip = get_wled_ip()
+    if not ip:
+        return {"success": False, "message": "WLED IP not configured. Run discover_wled.py first or set ip in config.json"}
+
     steps = []
 
     if dry_run:
@@ -71,18 +78,25 @@ def import_recipe(recipe_file, save_preset_name=None, skip_palette=False, dry_ru
             "message": f"Would import recipe '{recipe.get('name', 'unnamed')}' to WLED at {ip}"
         }
 
-    # Step 1: Upload custom palette (if palette_data exists)
+    # Load config for preset ID range
+    config_path = os.path.join(SKILL_DIR, "config.json")
+    with open(config_path, "r") as f:
+        config = json.load(f)
+    storage_cfg = config.get("recipe_storage", {})
+    preset_id_start = storage_cfg.get("preset_id_start", 100)
+    preset_id_end = storage_cfg.get("preset_id_end", 250)
+
+    # Step 1: Upload custom palette (if palette_data exists, optional - apply_recipe uses col array directly)
     palette_id = 0
     if not skip_palette and recipe.get("palette_data"):
-        # Import upload function from upload_palette.py
         sys.path.insert(0, SCRIPT_DIR)
         try:
             from upload_palette import upload_palette
             pal_result = upload_palette(palette_id, recipe["palette_data"])
             steps.append({"step": "upload_palette", "result": pal_result})
             if not pal_result.get("success"):
-                # Non-fatal: continue without custom palette
-                steps.append({"step": "upload_palette", "warning": "Palette upload failed, continuing with built-in palette"})
+                # Non-fatal: continue without custom palette (apply_recipe uses col array)
+                steps.append({"step": "upload_palette", "warning": "Palette upload failed, continuing with col array colors"})
         except Exception as e:
             steps.append({"step": "upload_palette", "warning": f"Palette upload skipped: {e}"})
 
@@ -104,12 +118,13 @@ def import_recipe(recipe_file, save_preset_name=None, skip_palette=False, dry_ru
     if save_preset_name:
         try:
             from save_preset import find_free_preset_id, save_preset
-            pid = find_free_preset_id(ip)
+            # Pass preset ID range from config
+            pid = find_free_preset_id(ip, preset_id_start, preset_id_end)
             if pid:
                 preset_result = save_preset(pid, save_preset_name)
                 steps.append({"step": "save_preset", "result": preset_result})
             else:
-                steps.append({"step": "save_preset", "warning": "No free preset ID available"})
+                steps.append({"step": "save_preset", "warning": f"No free preset ID in range {preset_id_start}-{preset_id_end}"})
         except Exception as e:
             steps.append({"step": "save_preset", "warning": f"Preset save failed: {e}"})
 
@@ -128,6 +143,10 @@ def import_recipe(recipe_file, save_preset_name=None, skip_palette=False, dry_ru
 
 
 def main():
+    if "--help" in sys.argv or "-h" in sys.argv:
+        print(__doc__)
+        sys.exit(0)
+
     if len(sys.argv) < 2 or sys.argv[1].startswith("--"):
         print(json.dumps({"success": False, "message": "Usage: import_recipe.py <recipe_json_file> [--save-preset NAME] [--no-palette] [--dry-run]"}, ensure_ascii=False))
         sys.exit(1)

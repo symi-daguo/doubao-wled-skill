@@ -55,15 +55,19 @@ complete WLED light recipe by:
 ## Configuration
 
 Before first use, edit `config.json` in the skill directory:
-- `wled.ip`: WLED device IP (or leave empty for mDNS auto-discovery)
-- `wled.mdns_name`: WLED mDNS hostname (e.g. wled-751f84)
-- `layout.type`: LED strip layout - "tv_backlight", "linear", "ring", or "matrix"
-- `layout.edges`: For TV backlight, specify top/bottom/left/right LED counts
-- `layout.total_leds`: Total LED count (auto-detected if mismatched with device)
+- `wled.ip`: WLED device IP (leave empty for mDNS auto-discovery, OR fill in like "192.168.1.100")
+- `wled.mdns_name`: WLED mDNS hostname (e.g. wled-751f84, leave empty for auto-discovery)
+- `layout.type`: LED strip layout - "tv_backlight", "linear", "ring", or "matrix" (default: "linear")
+- `layout.edges`: For TV backlight, specify top/bottom/left/right LED counts (e.g. {"top":16,"bottom":16,"left":12,"right":12})
+- `layout.total_leds`: Total LED count (set to 0 to auto-detect from device)
+
+**Note**: If config is left empty, the skill auto-discovers WLED via mDNS and reads LED count from device.
+If mDNS fails, ask user for WLED IP and set it in config.json before proceeding.
 
 ## Complete Workflow
 
-When a user requests a light recipe, follow these steps in order:
+When a user requests a light recipe, follow these steps in order.
+**IMPORTANT**: Use absolute path `/tmp/wled_analysis.json` for temp file, and replace {WLED_IP} with actual IP from Step 1.
 
 ### Step 1: Discover WLED Device
 
@@ -71,10 +75,10 @@ When a user requests a light recipe, follow these steps in order:
 python3 scripts/discover_wled.py
 ```
 
-- If success: note the IP address from the JSON output
-- If failed: ask user for WLED IP and update config.json
-- The script caches the IP, subsequent calls are fast
-- Only re-scan if health check fails
+- If success: note the `ip` field from JSON output (e.g. "192.168.1.100"), use as {WLED_IP} in later steps
+- If failed: ask user "请告诉我WLED灯带的IP地址", then update config.json with the IP
+- The script caches the IP to `scripts/.wled_cache.json`, subsequent calls are fast
+- Only re-scan if health check fails or cache is missing
 
 ### Step 2: Search for Scene Images
 
@@ -87,12 +91,12 @@ Use Doubao's built-in web search to find images for the scene:
 ### Step 3: Analyze Image Colors
 
 ```bash
-python3 scripts/analyze_image.py "<image_url>" --json --num-colors 5
+python3 scripts/analyze_image.py "<image_url>" --json --num-colors 5 > /tmp/wled_analysis.json
 ```
 
 - The script downloads the image, extracts dominant colors via quantization
 - Outputs JSON with: colors, palette_data, recipe_suggestion, wled_state_patch
-- Save the full JSON output to a temp file for later use
+- **IMPORTANT**: Save output to `/tmp/wled_analysis.json` (used in Step 4)
 - Note the `recipe_suggestion.rationale` to explain the choice to user
 
 ### Step 4: Export Recipe (Portable File)
@@ -100,12 +104,11 @@ python3 scripts/analyze_image.py "<image_url>" --json --num-colors 5
 ```bash
 python3 scripts/export_recipe.py \
   --name "{Scene Name}" \
-  --analysis /tmp/analysis.json \
-  --description "{scene description}" \
-  --output recipes/{scene}_{timestamp}.json
+  --analysis /tmp/wled_analysis.json \
+  --description "{scene description}"
 ```
 
-- This creates a portable recipe file in the `recipes/` directory
+- This creates a portable recipe file in the `recipes/` directory (auto-named with timestamp)
 - The file can be shared with others and imported on any WLED
 
 ### Step 5: Import and Apply Recipe (Full Pipeline)
@@ -151,16 +154,19 @@ python3 scripts/import_recipe.py recipes/{file} --save-preset "{name}"
 
 ### "Stop the lights" / "Turn off"
 
+First get WLED IP from cache or Step 1, then run (replace 192.168.1.100 with actual IP):
 ```bash
 python3 -c "
 import urllib.request, json
-req = urllib.request.Request('http://{WLED_IP}/json/state',
+req = urllib.request.Request('http://192.168.1.100/json/state',
     data=json.dumps({'on': False, 'live': False}).encode(),
     headers={'Content-Type': 'application/json'})
 urllib.request.urlopen(req, timeout=3)
 print('Lights off')
 "
 ```
+
+**Note**: Replace `192.168.1.100` with the actual WLED IP from Step 1 or `scripts/.wled_cache.json`.
 
 ### "List all recipes"
 

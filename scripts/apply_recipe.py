@@ -8,6 +8,7 @@ Usage:
     python3 apply_recipe.py <recipe_json_file>
     python3 apply_recipe.py <recipe_json_file> --dry-run    # preview without applying
     python3 apply_recipe.py --stdin                          # read recipe from stdin
+    python3 apply_recipe.py --help                           # show help
 
 Recipe JSON format (compatible with analyze_image.py output):
 {
@@ -18,7 +19,7 @@ Recipe JSON format (compatible with analyze_image.py output):
   "sx": 176,                         # speed
   "ix": 165,                         # intensity
   "bri": 200,                        # brightness
-  "pal": 0                           # palette ID (0=default, will use custom if uploaded)
+  "pal": 0                           # palette ID (0=default, uses col array)
 }
 
 Output: JSON with {success, applied_state, wled_response, message}
@@ -39,20 +40,28 @@ def load_config():
 
 
 def get_wled_ip():
-    """Get WLED IP from cache or run discovery."""
+    """Get WLED IP from cache or config. Returns empty string if not found."""
     cache_path = os.path.join(SCRIPT_DIR, ".wled_cache.json")
     if os.path.exists(cache_path):
-        with open(cache_path, "r") as f:
-            cache = json.load(f)
-            if cache.get("ip"):
-                return cache["ip"]
-    # Fallback to config
+        try:
+            with open(cache_path, "r") as f:
+                cache = json.load(f)
+                if cache.get("ip"):
+                    return cache["ip"]
+        except Exception:
+            pass
     config = load_config()
-    return config.get("wled", {}).get("ip", "192.168.2.66")
+    ip = config.get("wled", {}).get("ip", "")
+    if ip:
+        return ip
+    # No IP found - caller should handle empty string
+    return ""
 
 
 def wled_request(ip, path, method="GET", data=None, timeout=5):
     """Make HTTP request to WLED device."""
+    if not ip:
+        return {"error": "WLED IP not configured. Run discover_wled.py first or set ip in config.json"}
     url = f"http://{ip}{path}"
     req = urllib.request.Request(url, headers={"User-Agent": "DoubaoWledSkill/1.0"})
     if method == "POST" and data is not None:
@@ -76,24 +85,37 @@ def wled_request(ip, path, method="GET", data=None, timeout=5):
 
 
 def stop_udp_realtime(ip):
-    """Stop UDP realtime mode so JSON API can take control.
-    WLED 0.14+ respects {'live':false} to force exit realtime.
-    """
-    # Send a state update to force exit live mode
+    """Stop UDP realtime mode so JSON API can take control."""
     result = wled_request(ip, "/json/state", method="POST", data={"live": False, "on": True})
     return result
 
 
-def build_segments(recipe, config):
-    """Build segment configuration based on layout type."""
+def get_device_led_count(ip):
+    """Get actual LED count from WLED device info."""
+    info = wled_request(ip, "/json/info", method="GET", timeout=3)
+    if isinstance(info, dict) and "leds" in info:
+        return info.get("leds", {}).get("count", 0)
+    return 0
+
+
+def build_segments(recipe, config, device_led_count=0):
+    """Build segment configuration based on layout type.
+    Falls back to single segment if layout config is incomplete.
+    Uses col array for direct color setting (more reliable than custom palette).
+    """
     layout = config.get("layout", {})
     layout_type = layout.get("type", "linear")
-    total_leds = layout.get("total_leds", 56)
+    config_leds = layout.get("total_leds", 0)
+    # Prefer config value, fallback to device-reported count, finally default 60
+    total_leds = config_leds if config_leds > 0 else (device_led_count if device_led_count > 0 else 60)
+
     colors = recipe.get("colors", [[128, 128, 128]])
 
     # Ensure colors is list of lists
     if colors and isinstance(colors[0], int):
         colors = [colors]
+    if not colors:
+        colors = [[128, 128, 128]]
 
     # Pad colors to 3 slots
     while len(colors) < 3:
@@ -102,68 +124,39 @@ def build_segments(recipe, config):
     fx = recipe.get("fx", 9)
     sx = recipe.get("sx", 128)
     ix = recipe.get("ix", 200)
+    # pal=0 means use Default palette; actual colors come from col array
+    # This is more reliable than custom palette which requires WLED reboot
     pal = recipe.get("pal", 0)
     bri_seg = recipe.get("seg_bri", 255)
 
+    segments = []
+
     if layout_type == "tv_backlight" and layout.get("segment_strategy") == "per_edge":
-        # Create 4 segments for TV backlight (top, right, bottom, left)
         edges = layout.get("edges", {})
-        top = edges.get("top", total_leds // 4)
-        right = edges.get("right", total_leds // 4)
-        bottom = edges.get("bottom", total_leds // 4)
-        left = edges.get("left", total_leds // 4)
+        top = edges.get("top", 0)
+        right = edges.get("right", 0)
+        bottom = edges.get("bottom", 0)
+        left = edges.get("left", 0)
         direction = layout.get("direction", "cw")
         start_corner = layout.get("start_corner", "top_left")
 
-        # Calculate segment boundaries based on start corner and direction
-        # For CW from top_left: top(0-top), right(top-top+right), bottom, left
-        segments = []
-        pos = 0
-        edge_order = []
-        if direction == "cw":
-            if start_corner == "top_left":
-                edge_order = [("top", top), ("right", right), ("bottom", bottom), ("left", left)]
-            elif start_corner == "top_right":
-                edge_order = [("right", right), ("bottom", bottom), ("left", left), ("top", top)]
-            elif start_corner == "bottom_right":
-                edge_order = [("bottom", bottom), ("left", left), ("top", top), ("right", right)]
-            else:  # bottom_left
-                edge_order = [("left", left), ("top", top), ("right", right), ("bottom", bottom)]
-        else:  # ccw
-            if start_corner == "top_left":
-                edge_order = [("left", left), ("bottom", bottom), ("right", right), ("top", top)]
+        # If edges are all 0 but total_leds is set, distribute evenly
+        if top == 0 and right == 0 and bottom == 0 and left == 0 and total_leds > 0:
+            quarter = total_leds // 4
+            top = bottom = quarter
+            left = right = (total_leds - quarter * 2) // 2
+            # Fallback: if still all 0, use single segment
+            if top + right + bottom + left == 0:
+                segments = []
             else:
-                edge_order = [("top", top), ("right", right), ("bottom", bottom), ("left", left)]
-
-        for idx, (edge_name, length) in enumerate(edge_order):
-            if length <= 0:
-                continue
-            # Alternate colors per edge for variety
-            edge_color_idx = idx % min(len(colors), 3)
-            segments.append({
-                "id": idx,
-                "start": pos,
-                "stop": pos + length,
-                "len": length,
-                "on": True,
-                "bri": bri_seg,
-                "fx": fx,
-                "sx": sx,
-                "ix": ix,
-                "pal": pal,
-                "col": [colors[edge_color_idx], colors[(edge_color_idx + 1) % 3], colors[(edge_color_idx + 2) % 3]]
-            })
-            pos += length
-
-        # If we have unused LEDs, extend last segment
-        if pos < total_leds and segments:
-            segments[-1]["stop"] = total_leds
-            segments[-1]["len"] = total_leds - segments[-1]["start"]
-
-        return segments
+                segments = _build_tv_segments(top, right, bottom, left, direction, start_corner,
+                                              colors, fx, sx, ix, pal, bri_seg)
+        elif top + right + bottom + left > 0:
+            segments = _build_tv_segments(top, right, bottom, left, direction, start_corner,
+                                          colors, fx, sx, ix, pal, bri_seg)
     else:
-        # Single segment for linear/ring layouts
-        return [{
+        # linear / ring / matrix -> single segment
+        segments = [{
             "id": 0,
             "start": 0,
             "stop": total_leds,
@@ -174,8 +167,74 @@ def build_segments(recipe, config):
             "sx": sx,
             "ix": ix,
             "pal": pal,
-            "col": [colors[0], colors[1] if len(colors) > 1 else [0,0,0], colors[2] if len(colors) > 2 else [0,0,0]]
+            "col": [colors[0], colors[1], colors[2]]
         }]
+
+    # Fallback: if segments is empty for any reason, create single segment covering all LEDs
+    if not segments:
+        segments = [{
+            "id": 0,
+            "start": 0,
+            "stop": total_leds,
+            "len": total_leds,
+            "on": True,
+            "bri": bri_seg,
+            "fx": fx,
+            "sx": sx,
+            "ix": ix,
+            "pal": pal,
+            "col": [colors[0], colors[1], colors[2]]
+        }]
+
+    return segments
+
+
+def _build_tv_segments(top, right, bottom, left, direction, start_corner,
+                       colors, fx, sx, ix, pal, bri_seg):
+    """Build 4 segments for TV backlight layout."""
+    segments = []
+    pos = 0
+
+    if direction == "cw":
+        if start_corner == "top_left":
+            edge_order = [("top", top), ("right", right), ("bottom", bottom), ("left", left)]
+        elif start_corner == "top_right":
+            edge_order = [("right", right), ("bottom", bottom), ("left", left), ("top", top)]
+        elif start_corner == "bottom_right":
+            edge_order = [("bottom", bottom), ("left", left), ("top", top), ("right", right)]
+        else:  # bottom_left
+            edge_order = [("left", left), ("top", top), ("right", right), ("bottom", bottom)]
+    else:  # ccw
+        if start_corner == "top_left":
+            edge_order = [("left", left), ("bottom", bottom), ("right", right), ("top", top)]
+        else:
+            edge_order = [("top", top), ("right", right), ("bottom", bottom), ("left", left)]
+
+    for idx, (edge_name, length) in enumerate(edge_order):
+        if length <= 0:
+            continue
+        edge_color_idx = idx % 3
+        segments.append({
+            "id": idx,
+            "start": pos,
+            "stop": pos + length,
+            "len": length,
+            "on": True,
+            "bri": bri_seg,
+            "fx": fx,
+            "sx": sx,
+            "ix": ix,
+            "pal": pal,
+            "col": [colors[edge_color_idx], colors[(edge_color_idx + 1) % 3], colors[(edge_color_idx + 2) % 3]]
+        })
+        pos += length
+
+    # Extend last segment to cover any remaining LEDs
+    if segments and pos < sum(t for _, t in edge_order if t > 0):
+        # Already covered
+        pass
+
+    return segments
 
 
 def apply_recipe(recipe, dry_run=False):
@@ -183,16 +242,23 @@ def apply_recipe(recipe, dry_run=False):
     config = load_config()
     ip = get_wled_ip()
 
+    if not ip:
+        return {
+            "success": False,
+            "message": "WLED IP not configured. Please run: python3 scripts/discover_wled.py  or set ip in config.json"
+        }
+
     # Validate recipe
     if not recipe.get("colors") and not recipe.get("fx"):
         return {"success": False, "message": "Recipe must contain colors or fx"}
 
+    # Get device LED count for fallback
+    device_led_count = get_device_led_count(ip) if not dry_run else 0
+
     # Build state update
     bri = recipe.get("bri", 200)
-    segments = build_segments(recipe, config)
+    segments = build_segments(recipe, config, device_led_count)
 
-    # First: delete extra segments (keep only what we need)
-    # Then: set up our segments
     state_patch = {
         "on": True,
         "bri": bri,
@@ -207,8 +273,10 @@ def apply_recipe(recipe, dry_run=False):
             "success": True,
             "dry_run": True,
             "ip": ip,
+            "device_led_count": device_led_count,
             "state_patch": state_patch,
-            "message": f"Would apply recipe '{recipe.get('name', 'unnamed')}' to {ip}"
+            "segment_count": len(segments),
+            "message": f"Would apply recipe '{recipe.get('name', 'unnamed')}' to {ip} with {len(segments)} segment(s)"
         }
 
     # Step 1: Stop UDP realtime mode
@@ -221,30 +289,34 @@ def apply_recipe(recipe, dry_run=False):
     verify = wled_request(ip, "/json/state", method="GET")
 
     return {
-        "success": True,
+        "success": "error" not in apply_result,
         "ip": ip,
         "recipe_name": recipe.get("name", "unnamed"),
-        "state_patch": state_patch,
+        "segment_count": len(segments),
         "applied": apply_result,
         "verified_state": {
             "on": verify.get("on"),
             "bri": verify.get("bri"),
             "live": verify.get("live"),
             "mainseg": verify.get("mainseg"),
-            "seg_count": len(verify.get("seg", []))
+            "seg_count": len([s for s in verify.get("seg", []) if s.get("len", 0) > 0])
         },
-        "message": f"Recipe '{recipe.get('name', 'unnamed')}' applied to WLED at {ip}"
+        "message": f"Recipe '{recipe.get('name', 'unnamed')}' applied to WLED at {ip} ({len(segments)} segments)"
     }
 
 
 def main():
+    if "--help" in sys.argv or "-h" in sys.argv:
+        print(__doc__)
+        sys.exit(0)
+
     dry_run = "--dry-run" in sys.argv
     use_stdin = "--stdin" in sys.argv
 
     if use_stdin:
         recipe_str = sys.stdin.read()
     elif len(sys.argv) < 2 or sys.argv[1].startswith("--"):
-        print(json.dumps({"success": False, "message": "Usage: apply_recipe.py <recipe_json_file> [--dry-run]"}, ensure_ascii=False))
+        print(json.dumps({"success": False, "message": "Usage: apply_recipe.py <recipe_json_file> [--dry-run] [--stdin]"}, ensure_ascii=False))
         sys.exit(1)
     else:
         recipe_file = sys.argv[1]
