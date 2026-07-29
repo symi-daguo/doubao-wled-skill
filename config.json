@@ -1,0 +1,61 @@
+{
+  "version": "1.0.0",
+  "description": "Doubao WLED Light Recipe Skill - config file",
+  "wled": {
+    "ip": "",
+    "mdns_name": "",
+    "mdns_full": "",
+    "auto_discover": true,
+    "cache_path": "scripts/.wled_cache.json",
+    "health_check_timeout_sec": 2,
+    "re_discover_on_failure": true,
+    "note": "Leave ip/mdns_name empty to enable auto-discovery. Or fill in your WLED IP for faster connection."
+  },
+  "layout": {
+    "type": "tv_backlight",
+    "description": "LED strip layout type: tv_backlight, linear, ring, or matrix",
+    "total_leds": 0,
+    "edges": {
+      "top": 0,
+      "bottom": 0,
+      "left": 0,
+      "right": 0
+    },
+    "start_corner": "top_left",
+    "direction": "cw",
+    "segment_strategy": "per_edge",
+    "note": "Set total_leds and edges to match your physical LED strip. total_leds=0 means auto-detect from device."
+  },
+  "recipe_storage": {
+    "preset_id_start": 100,
+    "preset_id_end": 250,
+    "custom_palette_id_start": 0,
+    "custom_palette_id_end": 9,
+    "export_dir": "recipes",
+    "naming_pattern": "{scene}_{timestamp}.json"
+  },
+  "color_analysis": {
+    "method": "kmeans",
+    "num_colors": 5,
+    "min_saturation": 30,
+    "min_brightness": 20,
+    "avoid_overdark": true
+  },
+  "effect_mapping": {
+    "default_fx": 9,
+    "dynamic_scenes": [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25],
+    "static_scenes": [0, 1, 2, 3, 4, 5, 6, 7, 8],
+    "nature_themes": [10, 14, 21, 22, 25, 26, 27, 35, 36, 37, 39, 49, 50],
+    "party_themes": [6, 11, 12, 19, 20, 27, 28, 29, 30],
+    "sunset_themes": [13, 21, 35, 36, 47],
+    "default_speed": 128,
+    "default_intensity": 200,
+    "loop_playlist": true
+  },
+  "image_search": {
+    "source": "doubao_builtin",
+    "max_images_per_query": 3,
+    "preferred_orientation": "landscape",
+    "fallback_query_template": "{scene} high quality photo"
+  }
+}

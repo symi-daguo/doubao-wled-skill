@@ -1,0 +1,29 @@
+{
+  "name": "Jasmine Blooms Example",
+  "description": "Example recipe - jasmine flower green and white tones",
+  "version": "1.0",
+  "format": "doubao-wled-recipe-v1",
+  "created_at": "2026-07-29T11:07:28",
+  "source_image": "assets/real_jasmine.jpg",
+  "colors": [
+    [82, 107, 79],
+    [105, 145, 92],
+    [53, 80, 46],
+    [122, 158, 96],
+    [35, 58, 27]
+  ],
+  "palette_data": [0, 82, 107, 79, 63, 105, 145, 92, 127, 53, 80, 46, 191, 122, 158, 96, 255, 35, 58, 27],
+  "fx": 10,
+  "sx": 174,
+  "ix": 159,
+  "bri": 169,
+  "pal": 0,
+  "theme": "nature",
+  "rationale": "Green/yellow tones (avg hue 92.0 deg) - nature/forest effect",
+  "color_stats": {
+    "avg_hue": 92.0,
+    "avg_saturation": 41.6,
+    "avg_brightness": 45.4,
+    "hue_range": 45.7
+  }
+}
