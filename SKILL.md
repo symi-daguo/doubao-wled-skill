@@ -1,7 +1,7 @@
 ---
 name: wled-light-recipe
 description: WLED智能灯带光配方设计师。通过搜索多张图片、解析颜色分布、生成平顺丝滑的动态灯光效果并应用到局域网WLED设备。当用户需要基于场景的灯光效果（如茉莉花、日落、海洋）、WLED控制、光配方时调用此技能。
-version: 2.0.0
+version: 1.0.1
 author: symi-daguo
 category: smart-home
 permissions:
@@ -30,7 +30,7 @@ triggers:
   - 调色板
 ---
 
-# WLED Light Recipe Skill v2.0
+# WLED Light Recipe Skill v1.0.1
 
 Design smooth, continuously animating light recipes for WLED LED strips.
 Turn "jasmine blooms" into a gentle flowing color gradient on your LED strip.
@@ -46,6 +46,83 @@ smooth WLED light recipe by:
 5. Applying with SLOW speed (SX=70) and LOW intensity (IX=100) for non-flashing animation
 6. Saving as a WLED preset for reuse
 7. Exporting a portable JSON recipe file for sharing
+
+## Color Calculation Logic (How Images Become Light Recipes)
+
+### Step 1: Image Download & Preprocessing
+- Download image from URL using urllib
+- Load with PIL (Pillow), resize to 150x150 max for speed
+- Convert to RGB mode (remove alpha channel)
+
+### Step 2: Color Quantization (PIL quantize method)
+- Use PIL `Image.quantize(colors=N)` to reduce colors to top N (default 5)
+- This groups similar pixels and returns the most representative colors
+- Fallback: 4x4x4 RGB histogram (64 buckets) if quantize fails
+
+### Step 3: HSV Conversion & Filtering
+Each extracted RGB color is converted to HSV and filtered:
+- `min_brightness=20`: Skip colors with V<20 (too dark, invisible on LED strip)
+- `min_saturation=30`: Colors with S<30 (gray/white) are separated into `gray_colors`
+- If saturated colors < 3: gray_colors are added back as fallback (preserves white flowers, clouds, snow)
+
+### Step 4: Color Ratio Calculation
+- Each color's ratio = pixel_count / total_pixels
+- Colors are sorted by ratio descending (most dominant first)
+- Top N colors are selected and ratios normalized to sum=1.0
+
+### Step 5: Multi-Image Color Merging
+When analyzing 2-4 images, colors from ALL images are merged:
+1. Collect all colors from all images into one pool
+2. Sort by ratio descending
+3. Pick top 3 DISTINCT colors (hue difference > 30 degrees, RGB difference > 50)
+4. This ensures color variety (e.g., green from leaves + yellow from flower center + white from petals)
+
+### Step 6: Theme Detection & FX Selection
+Dominant theme is determined by averaging hue values weighted by ratio:
+- Hue 0-60°, 330-360° = "warm" → FX 13 (Sunset, smooth warm gradient)
+- Hue 60-180° = "nature" → FX 12 (Fade, smoothest color crossfade)
+- Hue 180-270° = "cool" → FX 50 (Aurora, smooth northern lights)
+- Hue 270-330° = "party" → FX 12 (Fade, default smooth)
+
+### Step 7: Parameter Tuning
+- SX (Speed) = 70: Slow, gentle movement (range 50-90, NEVER > 128)
+- IX (Intensity) = 100: Subtle, balanced (range 80-120, NEVER > 150)
+- BRI (Brightness) = 180: Comfortable (range 150-200)
+- These values are verified on real WLED 17.0.0-devV5 to produce smooth, non-flashing animation
+
+## Dynamic Animation Strategy (1-Minute Loop)
+
+### How WLED FX 12 (Fade) Works (Source Code Analysis)
+
+From WLED source code `wled00/FX.cpp` line 453:
+```cpp
+void mode_fade(void) {
+  unsigned counter = (strip.now * ((SEGMENT.speed >> 3) + 10));
+  uint8_t lum = triwave16(counter) >> 8;
+  // Blend between color1 and color2 based on lum (0-255)
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    SEGMENT.setPixelColor(i, color_blend(SEGCOLOR(1), color_from_palette(...), lum));
+  }
+}
+```
+
+### Fade Period Calculation (SX=70)
+- `counter = now_ms * ((70 >> 3) + 10) = now_ms * 18`
+- `triwave16()` has period 65536 (2^16)
+- One complete fade cycle: 65536 / 18 = 3641ms = 3.6 seconds
+- In 60 seconds: 60 / 3.6 = 16.7 fade cycles
+
+### What This Means for the User
+- Every 3.6 seconds: colors smoothly transition from color1 → color2 → color1
+- In 1 minute: approximately 16-17 complete color transitions
+- Effect is CONTINUOUSLY animated, never static
+- Effect LOOPS INFINITELY until user changes it (no 1-minute timeout)
+- No playlist needed - single FX with col array handles everything
+
+### Why Not Playlist?
+WLED 17.0.0-devV5 playlist auto-advance has a bug (playlist saves but does not auto-advance).
+Single FX with col array is more reliable across all WLED versions.
+The "1-minute" concept means: within any 1-minute window, user sees ~17 color transitions.
 
 ## CRITICAL RULES (NEVER Violate)
 
@@ -292,5 +369,5 @@ wled-light-recipe/
 
 ## Version History
 
-- v2.0.0: Multi-image fusion, SMOOTH-ONLY effects, SX=70/IX=100 non-flashing
-- v1.0.0: Initial release, single image, had flashing issues
+- v1.0.1: 修复暴闪问题，仅用平滑FX(Fade/Dissolve/Breathe)，SX=70/IX=100，多图融合
+- v1.0.0: 初始版本，单图分析，存在闪烁问题

@@ -81,8 +81,10 @@ def rgb_to_hsv(r, g, b):
 
 def extract_colors_quantize(img, num_colors=5):
     """Use PIL's quantize() for fast color reduction. Returns list of (rgb, count)."""
-    # Quantize to small palette (request more than needed, filter later)
-    quant_colors = num_colors * 4
+    # Quantize to larger palette to capture minority colors (white flowers, etc.)
+    # Request 8x more colors than needed, filter later
+    quant_colors = num_colors * 8
+    # method=2 (MEDIANCUT) is most compatible across PIL builds
     quantized = img.quantize(colors=quant_colors, method=2)  # 2 = MEDIANCUT
     palette = quantized.getpalette()[:quant_colors * 3]
     palette_rgb = [tuple(palette[i:i + 3]) for i in range(0, len(palette), 3)]
@@ -129,6 +131,28 @@ def extract_colors_histogram(img, num_colors=5):
     return result
 
 
+def detect_white_pixels(img, threshold=0.05):
+    """Detect if image has significant white/light pixels.
+    Returns average RGB of white pixels, or None if not enough white.
+    threshold: minimum ratio of white pixels (5% default)
+    """
+    pixels = list(img.getdata())
+    white_pixels = []
+    for r, g, b in pixels:
+        # White: high brightness, low saturation
+        if r > 200 and g > 200 and b > 180 and (max(r,g,b) - min(r,g,b)) < 40:
+            white_pixels.append((r, g, b))
+
+    if len(white_pixels) / len(pixels) >= threshold:
+        # Calculate average white
+        avg_r = sum(p[0] for p in white_pixels) // len(white_pixels)
+        avg_g = sum(p[1] for p in white_pixels) // len(white_pixels)
+        avg_b = sum(p[2] for p in white_pixels) // len(white_pixels)
+        ratio = len(white_pixels) / len(pixels)
+        return (avg_r, avg_g, avg_b), ratio
+    return None
+
+
 def analyze_colors(img, num_colors=5, min_saturation=30, min_brightness=20, avoid_overdark=True):
     """Extract dominant colors from image."""
     # Try fast quantize method first
@@ -139,6 +163,20 @@ def analyze_colors(img, num_colors=5, min_saturation=30, min_brightness=20, avoi
 
     if not raw_colors:
         return []
+
+    # Detect white pixels that quantize might have missed
+    # This ensures white flowers, clouds, snow etc. are captured
+    # Always add detected white (with accurate ratio) even if quantize found a similar color,
+    # because detect_white_pixels gives more accurate ratio (12% vs quantize's 3%)
+    white_info = detect_white_pixels(img, threshold=0.05)
+    if white_info:
+        white_rgb, white_ratio = white_info
+        # Remove any existing low-saturation high-brightness colors from raw_colors
+        # (they have inaccurate ratios from quantize)
+        raw_colors = [(rgb, ratio) for rgb, ratio in raw_colors
+                      if not (rgb_to_hsv(*rgb)[1] < 25 and rgb_to_hsv(*rgb)[2] > 80)]
+        # Add detected white with accurate ratio
+        raw_colors.insert(0, (white_rgb, white_ratio))
 
     # Filter colors based on HSV criteria
     # Track filtered-out colors for fallback use
@@ -163,9 +201,17 @@ def analyze_colors(img, num_colors=5, min_saturation=30, min_brightness=20, avoi
 
     # If filtering removed too many saturated colors, add gray/white colors as fallback
     # This preserves white flowers, clouds, snow etc. which are low-saturation but important
-    if len(colors) < 3 and gray_colors:
-        # Sort gray colors by ratio descending
-        gray_colors.sort(key=lambda x: x["ratio"], reverse=True)
+    # Also: if any gray color has high ratio (>10%), always include it
+    gray_colors.sort(key=lambda x: x["ratio"], reverse=True)
+
+    # Always include high-ratio gray colors (>10%) even if saturated colors are enough
+    # This ensures white flowers, clouds etc. are preserved
+    for gc in gray_colors:
+        if gc["ratio"] > 0.10 and gc not in colors:
+            colors.append(gc)
+
+    # If still not enough colors, add remaining gray colors as fallback
+    if len(colors) < 3:
         for gc in gray_colors:
             if gc not in colors:
                 colors.append(gc)
@@ -187,6 +233,10 @@ def analyze_colors(img, num_colors=5, min_saturation=30, min_brightness=20, avoi
                 colors.append(entry)
                 if len(colors) >= num_colors:
                     break
+
+    # Sort by ratio descending before taking top N
+    # This ensures high-ratio colors (including white from detect_white_pixels) are included
+    colors.sort(key=lambda x: x["ratio"], reverse=True)
 
     # Take top N
     result = colors[:num_colors]
